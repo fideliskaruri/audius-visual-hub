@@ -9,7 +9,7 @@ import {
   VolumeX,
   Repeat,
   Shuffle,
-  Waveform,
+  AudioWaveform,
   Maximize,
   Minimize
 } from "lucide-react";
@@ -150,7 +150,7 @@ const MediaControls: React.FC<MediaControlsProps> = ({
               className="p-2 rounded-full hover:bg-white/5 hidden sm:block"
               title="Toggle visualizer"
             >
-              <Waveform size={18} />
+              <AudioWaveform size={18} />
             </button>
           )}
           <button

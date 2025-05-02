@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -295,7 +294,10 @@ const MediaPlayer: React.FC = () => {
     const newVolume = Math.max(0, Math.min(1, vol));
     setVolume(newVolume);
     if (mediaRef.current) {
-      mediaRef.current.volume = newVolume;
+      // Use setAttribute for volume to avoid TypeScript error
+      mediaRef.current.setAttribute('volume', newVolume.toString());
+      // Also set the property directly for functionality to work
+      (mediaRef.current as any).volume = newVolume;
     }
     if (newVolume > 0 && isMuted) {
       setIsMuted(false);
@@ -419,6 +421,14 @@ const MediaPlayer: React.FC = () => {
   const currentMedia = mediaList[currentMediaIndex] || null;
   const isAudio = currentMedia?.type === 'audio';
   
+  // Apply volume after media element is created
+  useEffect(() => {
+    if (mediaRef.current) {
+      // Set volume programmatically 
+      (mediaRef.current as any).volume = volume;
+    }
+  }, [mediaRef.current, currentMediaIndex]);
+  
   return (
     <div className="flex flex-col h-full w-full max-w-6xl mx-auto px-4">
       <div className="text-center my-6">
@@ -453,10 +463,11 @@ const MediaPlayer: React.FC = () => {
                     className="hidden"
                     loop={isLooping}
                     muted={isMuted}
-                    volume={volume}
                     onLoadedMetadata={() => {
                       if (mediaRef.current) {
                         setDuration(mediaRef.current.duration);
+                        // Set volume on metadata load
+                        (mediaRef.current as any).volume = volume;
                       }
                     }}
                   />
@@ -472,11 +483,12 @@ const MediaPlayer: React.FC = () => {
                   className="max-h-full max-w-full object-contain"
                   loop={isLooping}
                   muted={isMuted}
-                  volume={volume}
                   onClick={togglePlayPause}
                   onLoadedMetadata={() => {
                     if (mediaRef.current) {
                       setDuration(mediaRef.current.duration);
+                      // Set volume on metadata load
+                      (mediaRef.current as any).volume = volume;
                     }
                   }}
                 />
