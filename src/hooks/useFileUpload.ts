@@ -21,55 +21,53 @@ export function useFileUpload({
 }: UseFileUploadProps) {
   const handleFileSelect = (files: FileList) => {
     Array.from(files).forEach((file: File) => {
-      const fileReader = new FileReader();
-      fileReader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        const isAudio = file.type.startsWith('audio');
-        const isVideo = file.type.startsWith('video');
+      // Create an object URL instead of reading the entire file
+      const objectUrl = URL.createObjectURL(file);
+      const isAudio = file.type.startsWith('audio');
+      const isVideo = file.type.startsWith('video');
+      
+      if (isAudio || isVideo) {
+        const newItem: PlaylistItem = {
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          name: file.name,
+          type: isAudio ? 'audio' : 'video',
+          dataUrl: objectUrl, // Store object URL instead of data URL
+          filePath: objectUrl, // Keep track of the object URL separately
+          duration: 0, // Will be updated once media is loaded
+          size: file.size
+        };
         
-        if (isAudio || isVideo) {
-          const newItem: PlaylistItem = {
-            id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            name: file.name,
-            type: isAudio ? 'audio' : 'video',
-            dataUrl: dataUrl,
-            duration: 0, // Will be updated once media is loaded
-            size: file.size
-          };
-          
-          setMediaList(prev => {
-            const newList = [...prev, newItem];
-            return newList;
-          });
-          
-          // If this is the first file, set it as current and play it
-          if (currentMediaIndex === -1) {
-            setCurrentMediaIndex(0);
-            setTimeout(() => {
-              setIsPlaying(true);
-              if (mediaRef.current) {
-                mediaRef.current.play().catch(console.error);
-              }
-            }, 100);
-          }
-          
-          toast.success(`Added ${file.name}`);
-        } else {
-          toast.error(`${file.name} is not a supported media file`);
+        setMediaList(prev => {
+          const newList = [...prev, newItem];
+          return newList;
+        });
+        
+        // If this is the first file, set it as current and play it
+        if (currentMediaIndex === -1) {
+          setCurrentMediaIndex(0);
+          setTimeout(() => {
+            setIsPlaying(true);
+            if (mediaRef.current) {
+              mediaRef.current.play().catch(console.error);
+            }
+          }, 100);
         }
-      };
-      
-      fileReader.onerror = () => {
-        toast.error(`Failed to load ${file.name}`);
-      };
-      
-      fileReader.readAsDataURL(file);
+        
+        toast.success(`Added ${file.name}`);
+      } else {
+        toast.error(`${file.name} is not a supported media file`);
+      }
     });
   };
 
   const handleRemoveItem = (id: string) => {
     const indexToRemove = mediaList.findIndex(item => item.id === id);
     if (indexToRemove === -1) return;
+    
+    // Revoke the object URL to free up memory
+    if (mediaList[indexToRemove].dataUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(mediaList[indexToRemove].dataUrl);
+    }
     
     const newList = mediaList.filter(item => item.id !== id);
     setMediaList(newList);

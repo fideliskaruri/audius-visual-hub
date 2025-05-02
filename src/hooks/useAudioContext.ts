@@ -45,8 +45,9 @@ export function useAudioContext(): UseAudioContextReturn {
     disconnectAudioSource();
     
     try {
-      // Only create a new source if the media element has changed
+      // Check if this is the same element we're already connected to
       if (mediaElement !== connectedElementRef.current) {
+        // Only create a new source if the element is different
         audioSourceRef.current = audioContext.createMediaElementSource(mediaElement);
         connectedElementRef.current = mediaElement;
       }
@@ -62,7 +63,11 @@ export function useAudioContext(): UseAudioContextReturn {
 
   const disconnectAudioSource = () => {
     if (audioSourceRef.current) {
-      audioSourceRef.current.disconnect();
+      try {
+        audioSourceRef.current.disconnect();
+      } catch (error) {
+        console.error("Error disconnecting audio source:", error);
+      }
     }
   };
 

@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { PlaylistItem } from "@/types/media";
@@ -40,9 +39,9 @@ export function usePlaylistStorage(): UsePlaylistStorageReturn {
   useEffect(() => {
     try {
       // Extract only the metadata (excluding the large dataUrl)
-      const metadataList = mediaList.map(({ id, name, type, duration, size }) => ({
-        id, name, type, duration, size, 
-        // Include a placeholder to indicate this is just metadata
+      const metadataList = mediaList.map(({ id, name, type, duration, size, filePath }) => ({
+        id, name, type, duration, size, filePath,
+        // We'll keep the filePath instead of dataUrl
         dataUrl: ''
       }));
       
