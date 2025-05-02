@@ -1,5 +1,5 @@
 
-import React from "react";
+import React, { useEffect } from "react";
 import { PlaylistItem } from "@/types/media";
 import MediaInfo from "./MediaInfo";
 import Visualizer from "./Visualizer";
@@ -35,6 +35,26 @@ const PlayerContent: React.FC<PlayerContentProps> = ({
 }) => {
   const isAudio = currentMedia?.type === 'audio';
   
+  // Effect to manage audio source connection
+  useEffect(() => {
+    if (mediaRef.current && currentMedia) {
+      // Connect audio source when media element is ready and we have valid media
+      const connectMedia = () => {
+        if (mediaRef.current) {
+          connectAudioSource(mediaRef.current);
+        }
+      };
+      
+      mediaRef.current.addEventListener('loadedmetadata', connectMedia);
+      
+      return () => {
+        if (mediaRef.current) {
+          mediaRef.current.removeEventListener('loadedmetadata', connectMedia);
+        }
+      };
+    }
+  }, [currentMedia, connectAudioSource]);
+  
   // If no media is selected
   if (currentMediaIndex < 0) {
     return (
@@ -65,8 +85,6 @@ const PlayerContent: React.FC<PlayerContentProps> = ({
           onLoadedMetadata={() => {
             if (mediaRef.current) {
               (mediaRef.current as any).volume = volume;
-              // Connect the audio element to the audio context
-              connectAudioSource(mediaRef.current);
             }
           }}
         />
@@ -90,8 +108,6 @@ const PlayerContent: React.FC<PlayerContentProps> = ({
       onLoadedMetadata={() => {
         if (mediaRef.current) {
           (mediaRef.current as any).volume = volume;
-          // Connect the video element to the audio context for visualization
-          connectAudioSource(mediaRef.current);
         }
       }}
     />

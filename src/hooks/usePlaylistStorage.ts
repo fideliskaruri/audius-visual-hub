@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { PlaylistItem } from "@/types/media";
@@ -21,10 +22,24 @@ export function usePlaylistStorage(): UsePlaylistStorageReturn {
         const parsedMeta = JSON.parse(savedPlaylistMeta);
         // We'll only save metadata, not the actual file data
         if (Array.isArray(parsedMeta) && parsedMeta.length > 0) {
-          setMediaList(parsedMeta);
+          // Restore the object URLs for each file path
+          const restoredList = parsedMeta.map(item => {
+            // If the item has a filePath and it's a valid file URL or blob URL, use it
+            if (item.filePath && 
+                (item.filePath.startsWith('blob:') || 
+                 item.filePath.startsWith('file:'))) {
+              return {
+                ...item,
+                dataUrl: item.filePath // Use the filePath as dataUrl
+              };
+            }
+            return item;
+          });
+          
+          setMediaList(restoredList);
           
           const lastIndex = parseInt(localStorage.getItem('currentMediaIndex') || '-1');
-          if (lastIndex >= 0 && lastIndex < parsedMeta.length) {
+          if (lastIndex >= 0 && lastIndex < restoredList.length) {
             setCurrentMediaIndex(lastIndex);
           }
         }
@@ -40,9 +55,7 @@ export function usePlaylistStorage(): UsePlaylistStorageReturn {
     try {
       // Extract only the metadata (excluding the large dataUrl)
       const metadataList = mediaList.map(({ id, name, type, duration, size, filePath }) => ({
-        id, name, type, duration, size, filePath,
-        // We'll keep the filePath instead of dataUrl
-        dataUrl: ''
+        id, name, type, duration, size, filePath
       }));
       
       localStorage.setItem('mediaPlaylistMeta', JSON.stringify(metadataList));

@@ -27,11 +27,21 @@ export function useFileUpload({
       const isVideo = file.type.startsWith('video');
       
       if (isAudio || isVideo) {
+        // Check if this file already exists in the playlist (by name and size)
+        const fileExists = mediaList.some(
+          item => item.name === file.name && item.size === file.size
+        );
+        
+        if (fileExists) {
+          toast.info(`${file.name} is already in your playlist`);
+          return;
+        }
+        
         const newItem: PlaylistItem = {
           id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           name: file.name,
           type: isAudio ? 'audio' : 'video',
-          dataUrl: objectUrl, // Store object URL instead of data URL
+          dataUrl: objectUrl, // Store object URL
           filePath: objectUrl, // Keep track of the object URL separately
           duration: 0, // Will be updated once media is loaded
           size: file.size
