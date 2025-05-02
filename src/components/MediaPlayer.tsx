@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -87,24 +86,43 @@ const MediaPlayer: React.FC = () => {
     }
     
     return () => {
+      // Clean up audio context when component unmounts
       if (audioContext) {
         audioContext.close();
       }
     };
   }, [mediaRef.current, audioContext]);
 
-  // Connect media element to audio context when both exist
+  // Clean up audio connections when media changes
   useEffect(() => {
-    if (mediaRef.current && audioContext && analyser) {
+    // Cleanup function to disconnect previous audio connections
+    if (audioSourceRef.current) {
+      audioSourceRef.current.disconnect();
+      audioSourceRef.current = null;
+    }
+    
+    return () => {
+      // Cleanup when media changes or component unmounts
       if (audioSourceRef.current) {
         audioSourceRef.current.disconnect();
+        audioSourceRef.current = null;
       }
-      
-      audioSourceRef.current = audioContext.createMediaElementSource(mediaRef.current as HTMLMediaElement);
-      audioSourceRef.current.connect(analyser);
-      analyser.connect(audioContext.destination);
+    };
+  }, [currentMediaIndex]);
+
+  // Connect media element to audio context when both exist and after cleanup
+  useEffect(() => {
+    if (mediaRef.current && audioContext && analyser && !audioSourceRef.current) {
+      try {
+        // Create a new media element source
+        audioSourceRef.current = audioContext.createMediaElementSource(mediaRef.current as HTMLMediaElement);
+        audioSourceRef.current.connect(analyser);
+        analyser.connect(audioContext.destination);
+      } catch (error) {
+        console.error("Error connecting audio source:", error);
+      }
     }
-  }, [mediaRef.current, audioContext, analyser, currentMediaIndex]);
+  }, [mediaRef.current, audioContext, analyser, currentMediaIndex, audioSourceRef.current]);
 
   // Handle media events
   useEffect(() => {
