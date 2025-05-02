@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -27,32 +28,43 @@ const MediaPlayer: React.FC = () => {
   const mediaContainerRef = useRef<HTMLDivElement>(null);
   const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   
-  // Load playlist from localStorage on initial render
+  // Load playlist metadata from localStorage on initial render
   useEffect(() => {
-    const savedPlaylist = localStorage.getItem('mediaPlaylist');
-    if (savedPlaylist) {
-      try {
-        const parsedPlaylist = JSON.parse(savedPlaylist);
-        // Filter out entries that don't have the necessary properties
-        const validPlaylist = parsedPlaylist.filter((item: any) => 
-          item.name && item.type && item.dataUrl
-        );
-        setMediaList(validPlaylist);
-        
-        const lastIndex = parseInt(localStorage.getItem('currentMediaIndex') || '-1');
-        if (lastIndex >= 0 && lastIndex < validPlaylist.length) {
-          setCurrentMediaIndex(lastIndex);
+    try {
+      const savedPlaylistMeta = localStorage.getItem('mediaPlaylistMeta');
+      if (savedPlaylistMeta) {
+        const parsedMeta = JSON.parse(savedPlaylistMeta);
+        // We'll only save metadata, not the actual file data
+        if (Array.isArray(parsedMeta) && parsedMeta.length > 0) {
+          setMediaList(parsedMeta);
+          
+          const lastIndex = parseInt(localStorage.getItem('currentMediaIndex') || '-1');
+          if (lastIndex >= 0 && lastIndex < parsedMeta.length) {
+            setCurrentMediaIndex(lastIndex);
+          }
         }
-      } catch (error) {
-        console.error("Error loading playlist from localStorage:", error);
-        toast.error("Couldn't load your saved playlist");
       }
+    } catch (error) {
+      console.error("Error loading playlist from localStorage:", error);
+      toast.error("Couldn't load your saved playlist");
     }
   }, []);
 
-  // Save playlist to localStorage whenever it changes
+  // Save only playlist metadata to localStorage (not the actual file data)
   useEffect(() => {
-    localStorage.setItem('mediaPlaylist', JSON.stringify(mediaList));
+    try {
+      // Extract only the metadata (excluding the large dataUrl)
+      const metadataList = mediaList.map(({ id, name, type, duration, size }) => ({
+        id, name, type, duration, size, 
+        // Include a placeholder to indicate this is just metadata
+        dataUrl: ''
+      }));
+      
+      localStorage.setItem('mediaPlaylistMeta', JSON.stringify(metadataList));
+    } catch (error) {
+      console.error("Error saving playlist metadata to localStorage:", error);
+      toast.error("Couldn't save your playlist metadata");
+    }
   }, [mediaList]);
 
   // Save current media index to localStorage whenever it changes
