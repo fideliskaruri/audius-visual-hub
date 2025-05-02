@@ -80,13 +80,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect }) => {
           Browse Files
         </Button>
         <p className="text-xs text-muted-foreground">
-          Supports audio and video formats
+          Supports all common audio and video formats (MP3, MP4, MKV, WebM, etc.)
         </p>
         <input
           ref={fileInputRef}
           type="file"
           multiple
-          accept="audio/*,video/*"
+          accept="audio/*,video/*,.mkv,.webm,.avi,.mov,.flv,.wmv,.m4a,.ogg,.opus,.flac,.wav,.aac,.alac"
           className="hidden"
           onChange={handleFileInput}
         />
