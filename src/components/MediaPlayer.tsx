@@ -1,21 +1,25 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+// Import only useDrag from the library
 import { useDrag } from '@use-gesture/react';
+// Import the custom hook
+import { useCustomLongPress } from '@/hooks/useCustomLongPress';
 import { cn } from "@/lib/utils";
 import MediaControls from "./MediaControls";
 import Playlist from "./Playlist";
-import FileUpload from "./FileUpload";
 import PlayerContent from "./PlayerContent";
 import ErrorBoundary from "./ErrorBoundary";
 import { usePlaylistStorage } from "@/hooks/usePlaylistStorage";
 import { useMediaControls } from "@/hooks/useMediaControls";
 import { useAudioContext } from "@/hooks/useAudioContext";
-import { useFileUpload } from "@/hooks/useFileUpload";
-import { Volume2, Sun } from "lucide-react";
+import { toast } from "sonner";
+import { Volume2, Sun, Rewind, FastForward, Play, Pause } from "lucide-react";
+import { formatTime } from "@/lib/utils";
 
-const CONTROLS_HIDE_DELAY = 4000; // Changed to 4 seconds
+const CONTROLS_HIDE_DELAY = 4000;
+const DOUBLE_CLICK_THRESHOLD = 300; // ms
+const LONG_PRESS_THRESHOLD = 500; // ms for hold-to-seek
 
 const MediaPlayer: React.FC = () => {
-  // --- Use Playlist Storage Hook ---
   const {
     mediaList,
     addMediaItem,
@@ -24,8 +28,6 @@ const MediaPlayer: React.FC = () => {
     setCurrentMediaIndex,
     isLoading: isPlaylistLoading,
   } = usePlaylistStorage();
-
-  // --- Use Media Controls Hook ---
   const {
     isPlaying,
     setIsPlaying,
@@ -52,224 +54,277 @@ const MediaPlayer: React.FC = () => {
     currentMediaIndex,
     setCurrentMediaIndex
   });
-
-  // --- Use Audio Context ---
   const {
     audioContext,
     analyser,
     connectAudioSource
   } = useAudioContext();
 
-  // --- Use File Upload Hook ---
-  const { handleFileSelect } = useFileUpload({
-    addMediaItem,
-    currentMediaIndex,
-    setCurrentMediaIndex,
-    setIsPlaying,
-    mediaListLength: mediaList.length,
-  });
-
-  // Local state
   const [showVisualizer, setShowVisualizer] = useState<boolean>(true);
-  const [simulatedBrightness, setSimulatedBrightness] = useState(1); // 0 (dark) to 1 (normal)
-  const [controlsVisible, setControlsVisible] = useState<boolean>(true); // State for controls visibility
+  const [simulatedBrightness, setSimulatedBrightness] = useState(1);
+  const [controlsVisible, setControlsVisible] = useState<boolean>(true);
   const [showVolumeIndicator, setShowVolumeIndicator] = useState(false);
   const [showBrightnessIndicator, setShowBrightnessIndicator] = useState(false);
-  const [indicatorValue, setIndicatorValue] = useState(0); // Holds current value for the active indicator
-  const indicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Timer to hide indicators
+  const [showSeekIndicator, setShowSeekIndicator] = useState(false);
+  const [showHoldSeekIndicator, setShowHoldSeekIndicator] = useState(false);
+  const [indicatorValue, setIndicatorValue] = useState(0);
+  const [seekIndicatorText, setSeekIndicatorText] = useState("");
+  const [holdSeekTime, setHoldSeekTime] = useState<number | null>(null);
+  const indicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Ref for the content area
   const playerContentRef = useRef<HTMLDivElement>(null);
   const gestureStateRef = useRef({
-    volume: 0,
-    brightness: 1,
-    isDragging: false,
-    dragStartX: 0,
-    dragStartY: 0,
+    volume: 0, brightness: 1, isDragging: false, dragStartX: 0, dragStartY: 0,
+    isHoldingSeek: false,
+    holdSeekStartTime: 0,
   });
-  const lastTapTimeRef = useRef(0); // For double-click detection
-  const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Timeout for single/double click distinction
-  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref for the hide timer
+  const lastTapTimeRef = useRef(0);
+  const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- Click / Double-Click Handler ---
+  const hideIndicators = useCallback(() => {
+    setShowVolumeIndicator(false);
+    setShowBrightnessIndicator(false);
+    setShowSeekIndicator(false);
+    setShowHoldSeekIndicator(false);
+    if (indicatorTimeoutRef.current) {
+      clearTimeout(indicatorTimeoutRef.current);
+      indicatorTimeoutRef.current = null;
+    }
+  }, []);
+
+  const showIndicatorWithTimeout = useCallback((type: 'volume' | 'brightness' | 'seek', value?: number | string, durationMs = 1000) => {
+    hideIndicators();
+    if (type === 'volume') {
+      setShowVolumeIndicator(true);
+      setIndicatorValue(value as number);
+    } else if (type === 'brightness') {
+      setShowBrightnessIndicator(true);
+      setIndicatorValue(value as number);
+    } else if (type === 'seek') {
+      setShowSeekIndicator(true);
+      setSeekIndicatorText(value as string);
+    }
+    indicatorTimeoutRef.current = setTimeout(hideIndicators, durationMs);
+  }, [hideIndicators]);
+
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
-    // Ignore clicks on controls
     if (target.closest('.media-controls-container')) return;
     if (!mediaRef.current || duration <= 0) return;
 
-    const now = Date.now(); // Use Date.now() for click events
-    const DOUBLE_CLICK_THRESHOLD = 300; // ms
+    const now = Date.now();
 
     if (now - lastTapTimeRef.current < DOUBLE_CLICK_THRESHOLD) {
-      // Double click detected
-      if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current); // Cancel single click timeout
-      lastTapTimeRef.current = 0; // Reset tap time
+      if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
+      lastTapTimeRef.current = 0;
 
       const rect = playerContentRef.current?.getBoundingClientRect();
       if (!rect) return;
-
-      // Get click position relative to the element
       const clickX = event.clientX - rect.left;
       const clickXPercent = clickX / rect.width;
 
-      if (clickXPercent < 0.3) { // Double click left side
-        console.log("Double Click Left: Seek Backward");
-        seekTo(Math.max(currentTime - 10, 0));
-      } else if (clickXPercent > 0.7) { // Double click right side
-        console.log("Double Click Right: Seek Forward");
-        seekTo(Math.min(currentTime + 10, duration));
-      } else { // Double click center
-        console.log("Double Click Center: Play/Pause");
+      let seekAmount = 0;
+      let indicatorText = "";
+      if (clickXPercent < 0.3) {
+        seekAmount = -10;
+        indicatorText = "-10s";
+      } else if (clickXPercent > 0.7) {
+        seekAmount = 10;
+        indicatorText = "+10s";
+      } else {
         togglePlayPause();
+        showIndicatorWithTimeout('seek', isPlaying ? 'Pause' : 'Play', 800);
+        return;
       }
+
+      const targetTime = Math.max(0, Math.min(currentTime + seekAmount, duration));
+      seekTo(targetTime);
+      showIndicatorWithTimeout('seek', indicatorText);
+
     } else {
-      // Potential single click - wait to see if it becomes a double click
       lastTapTimeRef.current = now;
       tapTimeoutRef.current = setTimeout(() => {
-        // If timeout executes, it was a single click
-        console.log("Single Click: (No action defined, could toggle controls visibility)");
-        // Example: toggleControlsVisibility();
-        lastTapTimeRef.current = 0; // Reset after timeout
+        if (isFullscreen) {
+          setControlsVisible(v => !v);
+          if (controlsTimeoutRef.current) {
+            clearTimeout(controlsTimeoutRef.current);
+            controlsTimeoutRef.current = null;
+          }
+        }
+        lastTapTimeRef.current = 0;
       }, DOUBLE_CLICK_THRESHOLD);
     }
   };
 
-  // --- Drag Gesture (Seek, Volume, Brightness) ---
-  const bindDrag = useDrag(({ event, down, movement: [mx, my], initial: [ix, iy], xy: [cx, cy], velocity: [vx, vy], direction: [dx, dy], first, last, memo }) => {
-    const target = event.target as HTMLElement;
-    // Ignore drags starting on controls
-    if (first && target.closest('.media-controls-container')) return;
+  const customLongPressBinds = useCustomLongPress({
+    threshold: LONG_PRESS_THRESHOLD,
+    moveThreshold: 15,
+    onLongPressStart: (event) => {
+      const target = event.target as HTMLElement;
+      const controlsContainer = document.querySelector('.media-controls-container');
+      if (controlsContainer && controlsContainer.contains(target)) {
+        console.log("Long press ignored on controls");
+        return;
+      }
+
+      if (gestureStateRef.current.isDragging) {
+        console.log("Long press ignored during other drag");
+        return;
+      }
+
+      console.log("Custom Long Press Detected - Starting Hold Seek");
+      gestureStateRef.current.isHoldingSeek = true;
+      gestureStateRef.current.holdSeekStartTime = currentTime;
+      setShowHoldSeekIndicator(true);
+      setHoldSeekTime(currentTime);
+      hideIndicators();
+    },
+    onLongPressEnd: (event) => {
+      if (gestureStateRef.current.isHoldingSeek) {
+        console.log("Custom Long Press Finish (Pointer Up)");
+        gestureStateRef.current.isHoldingSeek = false;
+        indicatorTimeoutRef.current = setTimeout(hideIndicators, 500);
+      }
+    },
+    onCancel: (event) => {
+      if (gestureStateRef.current.isHoldingSeek) {
+        console.log("Custom Long Press Cancelled (Movement/Leave)");
+        gestureStateRef.current.isHoldingSeek = false;
+        hideIndicators();
+      }
+    }
+  });
+
+  const bindDrag = useDrag(({ event, down, movement: [mx, my], initial: [ix, iy], velocity: [vx, vy], direction: [dx, dy], first, last, memo }) => {
+    const originalEvent = event as PointerEvent;
+    const target = originalEvent?.target as HTMLElement;
+    if (first && target?.closest('.media-controls-container')) {
+      console.log("Drag ignored on controls");
+      return;
+    }
+
     if (!mediaRef.current || duration <= 0) return;
 
     const container = playerContentRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
 
-    // --- Clear indicator hide timeout on new drag activity ---
     if (indicatorTimeoutRef.current) {
       clearTimeout(indicatorTimeoutRef.current);
       indicatorTimeoutRef.current = null;
     }
 
     if (first) {
-      // Determine gesture type based on initial movement direction
-      memo = Math.abs(dx) > Math.abs(dy) ? 'seek' : (ix < rect.width / 2 ? 'brightness' : 'volume');
-      gestureStateRef.current = {
-        volume: volume,
-        brightness: simulatedBrightness,
-        isDragging: true,
-        dragStartX: ix,
-        dragStartY: iy,
-      };
-      console.log("Gesture Start:", memo);
-
-      // --- Show initial indicator ---
-      if (memo === 'volume') {
-        setShowVolumeIndicator(true);
-        setShowBrightnessIndicator(false);
-        setIndicatorValue(gestureStateRef.current.volume);
-      } else if (memo === 'brightness') {
-        setShowBrightnessIndicator(true);
-        setShowVolumeIndicator(false);
-        setIndicatorValue(gestureStateRef.current.brightness);
+      if (gestureStateRef.current.isHoldingSeek) {
+        memo = 'hold-seek';
+        console.log("Drag Start: Continuing Hold Seek");
+        setShowHoldSeekIndicator(true);
+        setHoldSeekTime(currentTime);
       } else {
-        // Hide indicators if seeking
-        setShowVolumeIndicator(false);
-        setShowBrightnessIndicator(false);
+        memo = Math.abs(dx) > Math.abs(dy) ? 'seek' : (ix < rect.width / 2 ? 'brightness' : 'volume');
+        gestureStateRef.current = {
+          ...gestureStateRef.current,
+          volume: volume, brightness: simulatedBrightness, isDragging: true, dragStartX: ix, dragStartY: iy,
+        };
+        console.log("Drag Start:", memo);
+
+        if (memo === 'volume') {
+          showIndicatorWithTimeout('volume', volume, 99999);
+        } else if (memo === 'brightness') {
+          showIndicatorWithTimeout('brightness', simulatedBrightness, 99999);
+        } else {
+          hideIndicators();
+        }
       }
     }
 
-    if (!memo) return; // If type couldn't be determined or ignored
+    if (!memo) return;
 
-    // Calculate changes based on gesture type
-    if (memo === 'seek') {
-      // Horizontal drag for seeking
-      const seekChange = (mx / rect.width) * (duration / 2); // Adjust sensitivity
-      const targetTime = mediaRef.current.currentTime + seekChange;
-      // seekTo(targetTime); // Seek continuously? Might be laggy.
-      // Seek only on drag end for better performance?
+    if (memo === 'hold-seek') {
+      const seekChange = (mx / rect.width) * (duration * 0.5);
+      const targetTime = Math.max(0, Math.min(gestureStateRef.current.holdSeekStartTime + seekChange, duration));
+      seekTo(targetTime);
+      setHoldSeekTime(targetTime);
+    } else if (memo === 'seek') {
       if (last) {
-        const finalTargetTime = mediaRef.current.currentTime + (mx / rect.width) * (duration / 2);
+        const seekChange = (mx / rect.width) * (duration * 0.5);
+        const finalTargetTime = Math.max(0, Math.min(currentTime + seekChange, duration));
         console.log("Seek End:", finalTargetTime);
         seekTo(finalTargetTime);
-      } else {
-        // Optionally show visual feedback during drag
-        console.log("Seeking (drag):", targetTime);
       }
     } else {
-      // Vertical drag for volume or brightness
-      const change = -my / (rect.height * 1.5); // Adjust sensitivity (negative because Y increases downwards)
-
+      const change = -my / (rect.height * 1.5);
       if (memo === 'volume') {
         const newVolume = gestureStateRef.current.volume + change;
-        const clampedVolume = Math.max(0, Math.min(newVolume, 1)); // Clamp 0-1
-        setMediaVolume(clampedVolume); // Update actual volume
-        setIndicatorValue(clampedVolume); // Update indicator value
-        console.log("Volume Drag:", clampedVolume);
+        const clampedVolume = Math.max(0, Math.min(newVolume, 1));
+        setMediaVolume(clampedVolume);
+        setIndicatorValue(clampedVolume);
+        setShowVolumeIndicator(true);
       } else if (memo === 'brightness') {
         const newBrightness = gestureStateRef.current.brightness + change;
-        const clampedBrightness = Math.max(0.1, Math.min(newBrightness, 1)); // Clamp brightness
-        setSimulatedBrightness(clampedBrightness); // Update actual brightness
-        setIndicatorValue(clampedBrightness); // Update indicator value
-        console.log("Brightness Drag:", clampedBrightness);
+        const clampedBrightness = Math.max(0.1, Math.min(newBrightness, 1));
+        setSimulatedBrightness(clampedBrightness);
+        setIndicatorValue(clampedBrightness);
+        setShowBrightnessIndicator(true);
       }
     }
 
     if (last) {
-      console.log("Gesture End");
+      console.log("Drag End");
       gestureStateRef.current.isDragging = false;
-      memo = undefined;
 
-      // --- Hide indicators after a delay ---
-      indicatorTimeoutRef.current = setTimeout(() => {
-        setShowVolumeIndicator(false);
-        setShowBrightnessIndicator(false);
-        indicatorTimeoutRef.current = null;
-      }, 1000); // Hide after 1 second
+      if (!gestureStateRef.current.isHoldingSeek) {
+        indicatorTimeoutRef.current = setTimeout(hideIndicators, 1000);
+      }
+      memo = undefined;
     }
-    return memo; // Pass memo to next event
+    return memo;
   }, {
-    axis: undefined, // Allow movement on both axes initially
-    threshold: 10, // Minimum movement pixels to trigger drag
+    axis: undefined, threshold: 10,
+    eventOptions: { passive: false },
+    filterTaps: true,
+    pointer: { touch: true }
   });
 
-  // Keyboard Shortcuts
+  const combinedBinds = (...args: any[]) => ({
+    ...bindDrag(...args),
+    ...customLongPressBinds,
+  });
+
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    // Ignore shortcuts if typing in an input, textarea, etc.
     const target = event.target as HTMLElement;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
       return;
     }
 
-    // Only apply shortcuts if media is loaded
     if (!mediaRef.current || duration <= 0) return;
 
-    console.log("Key pressed:", event.code); // For debugging
+    console.log("Key pressed:", event.code);
 
     switch (event.code) {
       case 'Space':
-        event.preventDefault(); // Prevent page scroll
+        event.preventDefault();
         togglePlayPause();
         break;
-      case 'KeyK': // Common alternative for play/pause
+      case 'KeyK':
         togglePlayPause();
         break;
       case 'ArrowRight':
         event.preventDefault();
-        seekTo(Math.min(currentTime + 5, duration)); // Seek forward 5s
+        seekTo(Math.min(currentTime + 5, duration));
         break;
       case 'ArrowLeft':
         event.preventDefault();
-        seekTo(Math.max(currentTime - 5, 0)); // Seek backward 5s
+        seekTo(Math.max(currentTime - 5, 0));
         break;
       case 'ArrowUp':
         event.preventDefault();
-        setMediaVolume(Math.min(volume + 0.1, 1)); // Increase volume
+        setMediaVolume(Math.min(volume + 0.1, 1));
         break;
       case 'ArrowDown':
         event.preventDefault();
-        setMediaVolume(Math.max(volume - 0.1, 0)); // Decrease volume
+        setMediaVolume(Math.max(volume - 0.1, 0));
         break;
       case 'KeyM':
         toggleMute();
@@ -277,17 +332,16 @@ const MediaPlayer: React.FC = () => {
       case 'KeyF':
         toggleFullscreen();
         break;
-      case 'KeyN': // Next track (Shift+N often used)
+      case 'KeyN':
         if (event.shiftKey) {
           handleNextTrack();
         }
         break;
-      case 'KeyP': // Previous track (Shift+P often used)
+      case 'KeyP':
         if (event.shiftKey) {
           handlePreviousTrack();
         }
         break;
-      // Add more shortcuts (e.g., 'L' for loop, number keys for seeking percentage)
     }
   }, [
     togglePlayPause, seekTo, setMediaVolume, toggleMute, toggleFullscreen,
@@ -301,10 +355,8 @@ const MediaPlayer: React.FC = () => {
     };
   }, [handleKeyDown]);
 
-  // --- Function to manage controls visibility timeout ---
   const resetControlsTimeout = useCallback(() => {
     if (!isFullscreen) {
-      // Not fullscreen: ensure visible, clear timer
       setControlsVisible(true);
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current);
@@ -313,22 +365,19 @@ const MediaPlayer: React.FC = () => {
       return;
     }
 
-    // Is fullscreen: show controls, reset timer
-    setControlsVisible(true); // Ensure visible on activity
+    setControlsVisible(true);
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
     controlsTimeoutRef.current = setTimeout(() => {
       setControlsVisible(false);
       controlsTimeoutRef.current = null;
-    }, CONTROLS_HIDE_DELAY); // Use the updated delay
-  }, [isFullscreen]); // Depend on isFullscreen
+    }, CONTROLS_HIDE_DELAY);
+  }, [isFullscreen]);
 
-  // --- Effect to handle activity detection for controls ---
   useEffect(() => {
     const container = mediaContainerRef.current;
     if (!container || !isFullscreen) {
-      // Ensure controls are visible when not fullscreen or container missing
       setControlsVisible(true);
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current);
@@ -337,12 +386,11 @@ const MediaPlayer: React.FC = () => {
       return;
     }
 
-    // --- Attach listeners when fullscreen ---
     const handleActivity = () => {
       resetControlsTimeout();
     };
 
-    resetControlsTimeout(); // Initial call when entering fullscreen
+    resetControlsTimeout();
 
     container.addEventListener('mousemove', handleActivity);
     container.addEventListener('click', handleActivity);
@@ -359,11 +407,10 @@ const MediaPlayer: React.FC = () => {
     };
   }, [isFullscreen, mediaContainerRef, resetControlsTimeout]);
 
-  // Add loading indicator while playlist loads from DB
   if (isPlaylistLoading) {
     return (
       <div className="flex items-center justify-center h-full w-full">
-        <p>Loading playlist...</p> {/* Or use a spinner component */}
+        <p>Loading playlist...</p>
       </div>
     );
   }
@@ -382,60 +429,64 @@ const MediaPlayer: React.FC = () => {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow min-h-0"> {/* Add min-h-0 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow min-h-0">
         <div
           className={cn(
-            "flex flex-col", // Ensure vertical layout
+            "flex flex-col",
             isFullscreen ? "fixed inset-0 z-50 bg-black" : "lg:col-span-2",
-            "transition-all duration-300 ease-in-out" // Added transition
+            "transition-all duration-300 ease-in-out"
           )}
           ref={mediaContainerRef}
         >
-          {/* Gesture Area & Brightness Overlay */}
           <div
             ref={playerContentRef}
             className={cn(
               "relative w-full flex-grow rounded-lg overflow-hidden bg-black/40 flex items-center justify-center cursor-pointer",
-              isFullscreen ? "rounded-none w-full h-full" : "aspect-video", // Maintain aspect ratio when not fullscreen
-              "min-h-0" // Prevent flex item from growing indefinitely
+              isFullscreen ? "rounded-none w-full h-full" : "aspect-video",
+              "min-h-0"
             )}
             onClick={handleClick}
-            {...bindDrag()}
-            style={{ touchAction: 'none' }} // Prevent default browser touch actions like scrolling
+            {...combinedBinds()}
+            style={{ touchAction: 'none' }}
           >
-            {/* --- Volume & Brightness Indicators --- */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-              {/* Volume Indicator */}
+            <div className="absolute inset-x-0 top-0 pt-4 flex items-start justify-center pointer-events-none z-30 space-x-4">
               {showVolumeIndicator && (
                 <div className="flex flex-col items-center bg-black/60 p-3 rounded-lg">
                   <Volume2 size={24} className="mb-2 text-white" />
                   <div className="w-2 h-24 bg-gray-600 rounded-full overflow-hidden">
-                    <div
-                      className="bg-white rounded-full transition-all duration-100"
-                      style={{ height: `${indicatorValue * 100}%`, marginTop: `${(1 - indicatorValue) * 100}%` }}
-                    />
+                    <div className="bg-white rounded-full" style={{ height: `${indicatorValue * 100}%`, marginTop: `${(1 - indicatorValue) * 100}%` }} />
                   </div>
                   <span className="text-white text-sm mt-2">{Math.round(indicatorValue * 100)}%</span>
                 </div>
               )}
-              {/* Brightness Indicator */}
               {showBrightnessIndicator && (
                 <div className="flex flex-col items-center bg-black/60 p-3 rounded-lg">
                   <Sun size={24} className="mb-2 text-white" />
                   <div className="w-2 h-24 bg-gray-600 rounded-full overflow-hidden">
-                    <div
-                      className="bg-white rounded-full transition-all duration-100"
-                      style={{ height: `${indicatorValue * 100}%`, marginTop: `${(1 - indicatorValue) * 100}%` }}
-                    />
+                    <div className="bg-white rounded-full" style={{ height: `${indicatorValue * 100}%`, marginTop: `${(1 - indicatorValue) * 100}%` }} />
                   </div>
                   <span className="text-white text-sm mt-2">{Math.round(indicatorValue * 100)}%</span>
+                </div>
+              )}
+              {showSeekIndicator && (
+                <div className="flex items-center space-x-2 bg-black/60 p-3 px-4 rounded-lg text-white text-xl font-semibold">
+                  {seekIndicatorText.startsWith('+') && <FastForward size={24} />}
+                  {seekIndicatorText.startsWith('-') && <Rewind size={24} />}
+                  {seekIndicatorText === 'Play' && <Play size={24} />}
+                  {seekIndicatorText === 'Pause' && <Pause size={24} />}
+                  <span>{seekIndicatorText}</span>
+                </div>
+              )}
+              {showHoldSeekIndicator && holdSeekTime !== null && (
+                <div className="flex items-center space-x-2 bg-black/60 p-3 px-4 rounded-lg text-white text-xl font-semibold">
+                  <span>{formatTime(holdSeekTime)} / {formatTime(duration)}</span>
                 </div>
               )}
             </div>
 
             <ErrorBoundary>
               <PlayerContent
-                key={currentMedia?.id ?? 'no-media'} // Keep key prop
+                key={currentMedia?.id ?? 'no-media'}
                 currentMediaIndex={currentMediaIndex}
                 currentMedia={currentMedia}
                 mediaRef={mediaRef}
@@ -446,29 +497,25 @@ const MediaPlayer: React.FC = () => {
                 isMuted={isMuted}
                 volume={volume}
                 connectAudioSource={connectAudioSource}
-                onFileSelect={handleFileSelect} // Pass file select handler
+                onFileSelect={addMediaItem}
                 isFullscreen={isFullscreen}
               />
             </ErrorBoundary>
 
-            {/* Simulated Brightness Overlay */}
             <div
               className="absolute inset-0 pointer-events-none transition-colors duration-100"
               style={{
                 backgroundColor: `rgba(0, 0, 0, ${1 - simulatedBrightness})`,
-                zIndex: 10 // Ensure it's above the video but below controls
+                zIndex: 10
               }}
             />
           </div>
 
-          {/* Controls Container */}
           <div className={cn(
-            "w-full media-controls-container flex-shrink-0 z-20", // Ensure z-index
-            // Styles for fullscreen auto-hide
+            "w-full media-controls-container flex-shrink-0 z-20",
             isFullscreen && "absolute bottom-0 left-0 right-0 transition-opacity duration-300 ease-in-out",
-            isFullscreen && !controlsVisible && "opacity-0 pointer-events-none", // Hide when not visible in fullscreen
-            isFullscreen && controlsVisible && "opacity-100 pointer-events-auto" // Show when visible in fullscreen
-            // Note: Default styles (non-fullscreen) don't need opacity/pointer-events changes here
+            isFullscreen && !controlsVisible && "opacity-0 pointer-events-none",
+            isFullscreen && controlsVisible && "opacity-100 pointer-events-auto"
           )}>
             <MediaControls
               isPlaying={isPlaying}
@@ -494,18 +541,15 @@ const MediaPlayer: React.FC = () => {
           </div>
         </div>
 
-        {/* Playlist Section */}
         {!isFullscreen && (
-          <div className="lg:col-span-1 flex flex-col min-h-0"> {/* Add min-h-0 */}
-            {console.log("Rendering Playlist Section (isFullscreen=false)")}
+          <div className="lg:col-span-1 flex flex-col min-h-0">
             <Playlist
               mediaList={mediaList}
               currentMediaIndex={currentMediaIndex}
               isPlaying={isPlaying}
               onItemClick={(index) => setCurrentMediaIndex(index)}
-              onRemoveItem={removeMediaItem} // Pass removeMediaItem
+              onRemoveItem={removeMediaItem}
             />
-            <FileUpload onFileSelect={handleFileSelect} />
           </div>
         )}
       </div>
