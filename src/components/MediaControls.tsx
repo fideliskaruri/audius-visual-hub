@@ -1,4 +1,3 @@
-
 import React from "react";
 import {
   Play,
@@ -15,6 +14,7 @@ import {
 } from "lucide-react";
 import { formatTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { Slider } from "@/components/ui/slider";
 
 interface MediaControlsProps {
   isPlaying: boolean;
@@ -79,17 +79,19 @@ const MediaControls: React.FC<MediaControlsProps> = ({
         <span className="text-xs text-muted-foreground w-10 text-right">
           {formatTime(currentTime)}
         </span>
-        <input
-          type="range"
-          min={0}
+        <Slider
+          value={[currentTime]}
           max={duration || 100}
-          value={currentTime}
-          onChange={handleSeek}
-          className="w-full h-1.5 bg-player-muted rounded-full outline-none media-slider"
+          step={0.1}
+          onValueChange={(value) => seekTo(value[0])}
+          className="touch-none w-full h-1.5 bg-player-muted rounded-full outline-none media-slider"
+          aria-label="Seek position"
+          aria-valuemin={0}
+          aria-valuemax={duration || 100}
+          aria-valuenow={currentTime}
           style={{
-            background: `linear-gradient(to right, #9b87f5 ${
-              (currentTime / (duration || 1)) * 100
-            }%, #45475A ${(currentTime / (duration || 1)) * 100}%)`,
+            background: `linear-gradient(to right, #9b87f5 ${(currentTime / (duration || 1)) * 100
+              }%, #45475A ${(currentTime / (duration || 1)) * 100}%)`,
           }}
         />
         <span className="text-xs text-muted-foreground w-10">
@@ -160,19 +162,17 @@ const MediaControls: React.FC<MediaControlsProps> = ({
           >
             {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
-          <div className="relative w-20 hidden sm:block">
-            <input
-              type="range"
-              min={0}
+          <div className="relative hidden sm:block">
+            <Slider
+              value={[isMuted ? 0 : volume]}
               max={1}
               step={0.01}
-              value={isMuted ? 0 : volume}
-              onChange={handleVolumeChange}
-              className="w-full h-1 bg-player-muted rounded-full outline-none media-slider"
+              onValueChange={(value) => setVolume(value[0])}
+              className="touch-none w-24 h-1 bg-player-muted rounded-full outline-none media-slider"
+              aria-label="Volume"
               style={{
-                background: `linear-gradient(to right, #9b87f5 ${
-                  isMuted ? 0 : volume * 100
-                }%, #45475A ${isMuted ? 0 : volume * 100}%)`,
+                background: `linear-gradient(to right, #9b87f5 ${isMuted ? 0 : volume * 100
+                  }%, #45475A ${isMuted ? 0 : volume * 100}%)`,
               }}
             />
           </div>

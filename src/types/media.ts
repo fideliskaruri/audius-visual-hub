@@ -1,10 +1,7 @@
-
 export interface PlaylistItem {
   id: string;
   name: string;
+  url: string;  // Make sure this is named consistently
   type: 'audio' | 'video';
-  dataUrl: string;
-  filePath?: string; // Added for storing path or object URL
-  duration: number;
-  size: number;
+  file?: File;  // Optional file reference
 }

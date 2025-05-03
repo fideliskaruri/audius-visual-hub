@@ -1,119 +1,78 @@
-
 import { toast } from "sonner";
 import { PlaylistItem } from "@/types/media";
+import { useCallback } from "react";
 
 interface UseFileUploadProps {
-  mediaList: PlaylistItem[];
-  setMediaList: React.Dispatch<React.SetStateAction<PlaylistItem[]>>;
+  addMediaItem: (item: PlaylistItem) => Promise<void>;
   currentMediaIndex: number;
-  setCurrentMediaIndex: React.Dispatch<React.SetStateAction<number>>;
-  setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
-  mediaRef: React.RefObject<HTMLAudioElement | HTMLVideoElement>;
+  setCurrentMediaIndex: (index: number) => void;
+  setIsPlaying: (playing: boolean) => void;
+  mediaListLength: number;
 }
 
 export function useFileUpload({
-  mediaList,
-  setMediaList,
+  addMediaItem,
   currentMediaIndex,
   setCurrentMediaIndex,
   setIsPlaying,
-  mediaRef
+  mediaListLength
 }: UseFileUploadProps) {
-  const handleFileSelect = (files: FileList) => {
-    Array.from(files).forEach((file: File) => {
-      // Create an object URL instead of reading the entire file
-      const objectUrl = URL.createObjectURL(file);
-      const isAudio = file.type.startsWith('audio');
-      const isVideo = file.type.startsWith('video');
-      
-      if (isAudio || isVideo) {
-        // Check if this file already exists in the playlist (by name and size)
-        const fileExists = mediaList.some(
-          item => item.name === file.name && item.size === file.size
-        );
-        
-        if (fileExists) {
-          toast.info(`${file.name} is already in your playlist`);
-          return;
+
+  const handleFileSelect = useCallback(
+    async (files: FileList | null) => {
+      if (!files) return;
+
+      const unsupportedFiles: string[] = [];
+      let addedCount = 0;
+
+      for (const file of Array.from(files)) {
+        const fileType = file.type.startsWith("video/") ? "video" :
+          file.type.startsWith("audio/") ? "audio" : null;
+        const fileExt = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : '';
+
+        let isPotentiallyPlayable = false;
+        if (fileExt === 'mkv' && fileType === 'video') {
+          console.warn(`Attempting to load MKV file (${file.name}). Playback depends on browser's internal codec support.`);
+          isPotentiallyPlayable = true;
+        } else if (fileType) {
+          const testEl = fileType === 'video' ? document.createElement('video') : document.createElement('audio');
+          if (testEl.canPlayType(file.type)) {
+            isPotentiallyPlayable = true;
+          } else {
+            unsupportedFiles.push(`${file.name} (codec/container: ${file.type || 'unknown'})`);
+          }
+        } else {
+          unsupportedFiles.push(`${file.name} (unknown format)`);
         }
-        
-        const newItem: PlaylistItem = {
-          id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          name: file.name,
-          type: isAudio ? 'audio' : 'video',
-          dataUrl: objectUrl, // Store object URL
-          filePath: objectUrl, // Keep track of the object URL separately
-          duration: 0, // Will be updated once media is loaded
-          size: file.size
-        };
-        
-        setMediaList(prev => {
-          const newList = [...prev, newItem];
-          return newList;
-        });
-        
-        // If this is the first file, set it as current and play it
-        if (currentMediaIndex === -1) {
+
+        if (isPotentiallyPlayable) {
+          const newItem: PlaylistItem = {
+            id: crypto.randomUUID(),
+            name: file.name,
+            url: '',
+            type: fileType || 'video',
+            file: file
+          };
+          await addMediaItem(newItem);
+          addedCount++;
+        }
+      }
+
+      if (unsupportedFiles.length > 0) {
+        toast.warning(`Unsupported file(s): ${unsupportedFiles.join(", ")}`);
+      }
+
+      if (addedCount > 0) {
+        if (currentMediaIndex === -1 && mediaListLength === 0) {
           setCurrentMediaIndex(0);
-          setTimeout(() => {
-            setIsPlaying(true);
-            if (mediaRef.current) {
-              mediaRef.current.play().catch(console.error);
-            }
-          }, 100);
+          setIsPlaying(false);
         }
-        
-        toast.success(`Added ${file.name}`);
-      } else {
-        toast.error(`${file.name} is not a supported media file`);
       }
-    });
-  };
-
-  const handleRemoveItem = (id: string) => {
-    const indexToRemove = mediaList.findIndex(item => item.id === id);
-    if (indexToRemove === -1) return;
-    
-    // Revoke the object URL to free up memory
-    if (mediaList[indexToRemove].dataUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(mediaList[indexToRemove].dataUrl);
-    }
-    
-    const newList = mediaList.filter(item => item.id !== id);
-    setMediaList(newList);
-    
-    if (newList.length === 0) {
-      setCurrentMediaIndex(-1);
-      setIsPlaying(false);
-    } else if (indexToRemove === currentMediaIndex) {
-      // If we're removing the current item, play the next one or the previous if there's no next
-      const newIndex = Math.min(indexToRemove, newList.length - 1);
-      setCurrentMediaIndex(newIndex);
-      setTimeout(() => {
-        if (mediaRef.current) {
-          mediaRef.current.play().catch(console.error);
-        }
-      }, 100);
-    } else if (indexToRemove < currentMediaIndex) {
-      // If we're removing an item before the current, adjust the index
-      setCurrentMediaIndex(currentMediaIndex - 1);
-    }
-  };
-
-  const handlePlaylistItemClick = (index: number) => {
-    setCurrentMediaIndex(index);
-    setIsPlaying(true);
-    
-    setTimeout(() => {
-      if (mediaRef.current) {
-        mediaRef.current.play().catch(console.error);
-      }
-    }, 100);
-  };
+    },
+    [addMediaItem, currentMediaIndex, setCurrentMediaIndex, setIsPlaying, mediaListLength]
+  );
 
   return {
     handleFileSelect,
-    handleRemoveItem,
-    handlePlaylistItemClick
   };
 }
