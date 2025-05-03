@@ -10,6 +10,7 @@ import { usePlaylistStorage } from "@/hooks/usePlaylistStorage";
 import { useMediaControls } from "@/hooks/useMediaControls";
 import { useAudioContext } from "@/hooks/useAudioContext";
 import { useFileUpload } from "@/hooks/useFileUpload";
+import { Volume2, Sun } from "lucide-react";
 
 const CONTROLS_HIDE_DELAY = 4000; // Changed to 4 seconds
 
@@ -72,6 +73,10 @@ const MediaPlayer: React.FC = () => {
   const [showVisualizer, setShowVisualizer] = useState<boolean>(true);
   const [simulatedBrightness, setSimulatedBrightness] = useState(1); // 0 (dark) to 1 (normal)
   const [controlsVisible, setControlsVisible] = useState<boolean>(true); // State for controls visibility
+  const [showVolumeIndicator, setShowVolumeIndicator] = useState(false);
+  const [showBrightnessIndicator, setShowBrightnessIndicator] = useState(false);
+  const [indicatorValue, setIndicatorValue] = useState(0); // Holds current value for the active indicator
+  const indicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Timer to hide indicators
 
   // Ref for the content area
   const playerContentRef = useRef<HTMLDivElement>(null);
@@ -141,6 +146,12 @@ const MediaPlayer: React.FC = () => {
     if (!container) return;
     const rect = container.getBoundingClientRect();
 
+    // --- Clear indicator hide timeout on new drag activity ---
+    if (indicatorTimeoutRef.current) {
+      clearTimeout(indicatorTimeoutRef.current);
+      indicatorTimeoutRef.current = null;
+    }
+
     if (first) {
       // Determine gesture type based on initial movement direction
       memo = Math.abs(dx) > Math.abs(dy) ? 'seek' : (ix < rect.width / 2 ? 'brightness' : 'volume');
@@ -152,6 +163,21 @@ const MediaPlayer: React.FC = () => {
         dragStartY: iy,
       };
       console.log("Gesture Start:", memo);
+
+      // --- Show initial indicator ---
+      if (memo === 'volume') {
+        setShowVolumeIndicator(true);
+        setShowBrightnessIndicator(false);
+        setIndicatorValue(gestureStateRef.current.volume);
+      } else if (memo === 'brightness') {
+        setShowBrightnessIndicator(true);
+        setShowVolumeIndicator(false);
+        setIndicatorValue(gestureStateRef.current.brightness);
+      } else {
+        // Hide indicators if seeking
+        setShowVolumeIndicator(false);
+        setShowBrightnessIndicator(false);
+      }
     }
 
     if (!memo) return; // If type couldn't be determined or ignored
@@ -177,13 +203,16 @@ const MediaPlayer: React.FC = () => {
 
       if (memo === 'volume') {
         const newVolume = gestureStateRef.current.volume + change;
-        console.log("Volume Drag:", newVolume);
-        setMediaVolume(newVolume); // Clamping is handled inside setMediaVolume
+        const clampedVolume = Math.max(0, Math.min(newVolume, 1)); // Clamp 0-1
+        setMediaVolume(clampedVolume); // Update actual volume
+        setIndicatorValue(clampedVolume); // Update indicator value
+        console.log("Volume Drag:", clampedVolume);
       } else if (memo === 'brightness') {
         const newBrightness = gestureStateRef.current.brightness + change;
         const clampedBrightness = Math.max(0.1, Math.min(newBrightness, 1)); // Clamp brightness
+        setSimulatedBrightness(clampedBrightness); // Update actual brightness
+        setIndicatorValue(clampedBrightness); // Update indicator value
         console.log("Brightness Drag:", clampedBrightness);
-        setSimulatedBrightness(clampedBrightness);
       }
     }
 
@@ -191,6 +220,13 @@ const MediaPlayer: React.FC = () => {
       console.log("Gesture End");
       gestureStateRef.current.isDragging = false;
       memo = undefined;
+
+      // --- Hide indicators after a delay ---
+      indicatorTimeoutRef.current = setTimeout(() => {
+        setShowVolumeIndicator(false);
+        setShowBrightnessIndicator(false);
+        indicatorTimeoutRef.current = null;
+      }, 1000); // Hide after 1 second
     }
     return memo; // Pass memo to next event
   }, {
@@ -367,6 +403,36 @@ const MediaPlayer: React.FC = () => {
             {...bindDrag()}
             style={{ touchAction: 'none' }} // Prevent default browser touch actions like scrolling
           >
+            {/* --- Volume & Brightness Indicators --- */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+              {/* Volume Indicator */}
+              {showVolumeIndicator && (
+                <div className="flex flex-col items-center bg-black/60 p-3 rounded-lg">
+                  <Volume2 size={24} className="mb-2 text-white" />
+                  <div className="w-2 h-24 bg-gray-600 rounded-full overflow-hidden">
+                    <div
+                      className="bg-white rounded-full transition-all duration-100"
+                      style={{ height: `${indicatorValue * 100}%`, marginTop: `${(1 - indicatorValue) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-white text-sm mt-2">{Math.round(indicatorValue * 100)}%</span>
+                </div>
+              )}
+              {/* Brightness Indicator */}
+              {showBrightnessIndicator && (
+                <div className="flex flex-col items-center bg-black/60 p-3 rounded-lg">
+                  <Sun size={24} className="mb-2 text-white" />
+                  <div className="w-2 h-24 bg-gray-600 rounded-full overflow-hidden">
+                    <div
+                      className="bg-white rounded-full transition-all duration-100"
+                      style={{ height: `${indicatorValue * 100}%`, marginTop: `${(1 - indicatorValue) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-white text-sm mt-2">{Math.round(indicatorValue * 100)}%</span>
+                </div>
+              )}
+            </div>
+
             <ErrorBoundary>
               <PlayerContent
                 key={currentMedia?.id ?? 'no-media'} // Keep key prop
